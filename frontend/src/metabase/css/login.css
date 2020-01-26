@@ -1,6 +1,6 @@
 /* ensure our form doesn't get too wide */
 .Login-wrapper {
-  max-width: 1240px;
+  max-width: 1140px;
   margin: 0 auto;
 }
 
@@ -15,7 +15,7 @@
 
 .brand-scene {
   overflow: hidden;
-  height: 180px;
+  height: 190px;
 }
 
 .brand-boat-container {
@@ -78,7 +78,7 @@
 }
 
 .brand-illustration {
-  height: 180px;
+  height: 190px;
   position: absolute;
   bottom: 15px;
   z-index: 5;
