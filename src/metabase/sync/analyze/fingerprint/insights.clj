@@ -1,15 +1,16 @@
 (ns metabase.sync.analyze.fingerprint.insights
   "Deeper statistical analysis of results."
-  (:require [clj-time
-              [coerce :as t.coerce]
-              [core :as t]]
+  (:require [java-time :as t]
             [kixi.stats
              [core :as stats]
              [math :as math]]
+            [medley.core :as m]
             [metabase.mbql.util :as mbql.u]
             [metabase.models.field :as field]
             [metabase.sync.analyze.fingerprint.fingerprinters :as f]
-            [redux.core :as redux]))
+            [metabase.util.date-2 :as u.date]
+            [redux.core :as redux])
+  (:import [java.time Instant LocalDate LocalDateTime LocalTime OffsetDateTime OffsetTime ZonedDateTime]))
 
 (defn- last-n
   [n]
@@ -160,35 +161,40 @@
    :quarter (* 30.4 3)
    :year    365.1})
 
-(defn- infer-unit
-  [from to]
-  (when (and from to)
-    (some (fn [[unit duration]]
-            (when (about= (- to from) duration)
-              unit))
-          unit->duration)))
-
 (defn- valid-period?
   [from to unit]
   (when (and from to unit)
-    (about= (- to from) (unit->duration unit))))
+    ;; Make sure we work for both ascending and descending time series
+    (let [[from to] (sort [from to])]
+      (about= (- to from) (unit->duration unit)))))
+
+(defn- infer-unit
+  [from to]
+  (m/find-first (partial valid-period? from to) (keys unit->duration)))
+
+(defn- ->millis-from-epoch [t]
+  (when t
+    (condp instance? t
+      Instant        (t/to-millis-from-epoch t)
+      OffsetDateTime (t/to-millis-from-epoch t)
+      ZonedDateTime  (t/to-millis-from-epoch t)
+      ;; TODO - really not convinced this behavior makes sense. Not sure what `xfn` below is actually supposed to be
+      ;; doing? This roughly matches the old behavior when we were using `java.util.Date`.
+      LocalDate      (->millis-from-epoch (t/offset-date-time t (t/local-time 0) (t/zone-offset 0)))
+      LocalDateTime  (->millis-from-epoch (t/offset-date-time t (t/zone-offset 0)))
+      LocalTime      (->millis-from-epoch (t/offset-date-time (t/local-date "1970-01-01") t (t/zone-offset 0)))
+      OffsetTime     (->millis-from-epoch (t/offset-date-time (t/local-date "1970-01-01") t (t/zone-offset t))))))
 
 (defn- timeseries-insight
   [{:keys [numbers datetimes]}]
   (let [datetime   (first datetimes)
         x-position (:position datetime)
-        xfn        (if (or (-> datetime :base_type (isa? :type/DateTime))
-                           (field/unix-timestamp? datetime))
-                     #(some-> %
-                              (nth x-position)
-                              ;; at this point in the pipeline dates are still stings
-                              f/->date
-                              (.getTime)
-                              ms->day)
-                     ;; unit=year workaround. While the field is in this case marked as :type/Text,
-                     ;; at this stage in the pipeline the value is still an int, so we can use it
-                     ;; directly.
-                     #(some-> % (nth x-position) t/date-time t.coerce/to-long ms->day))]
+        xfn        #(some-> %
+                            (nth x-position)
+                            ;; at this point in the pipeline, dates are still stings
+                            f/->temporal
+                            ->millis-from-epoch
+                            ms->day)]
     (apply redux/juxt
            (for [number-col numbers]
              (redux/post-complete
@@ -212,17 +218,8 @@
                    :slope          slope
                    :offset         offset
                    :best-fit       best-fit
-                   :col            (:name number-col)})))))))
-
-(defn- datetime-truncated-to-year?
-  "This is hackish as hell, but we change datetimes with year granularity to strings upstream and
-   this is the only way to recover the information they were once datetimes."
-  [{:keys [base_type unit fingerprint] :as field}]
-  (and (= base_type :type/Text)
-       (contains? field :unit)
-       (nil? unit)
-       (or (nil? (:type fingerprint))
-           (-> fingerprint :type :type/DateTime))))
+                   :col            (:name number-col)
+                   :unit           unit})))))))
 
 (defn insights
   "Based on the shape of returned data construct a transducer to statistically analyize data."
@@ -232,13 +229,13 @@
                                          (assoc col :position idx)))
                           (group-by (fn [{:keys [base_type special_type unit] :as field}]
                                       (cond
-                                        (#{:type/FK :type/PK} special_type)          :others
-                                        (datetime-truncated-to-year? field)          :datetimes
-                                        (metabase.util.date/date-extract-units unit) :numbers
-                                        (field/unix-timestamp? field)                :datetimes
-                                        (isa? base_type :type/Number)                :numbers
-                                        (isa? base_type :type/DateTime)              :datetimes
-                                        :else                                        :others))))]
+                                        (#{:type/FK :type/PK} special_type) :others
+                                        (= unit :year)                      :datetimes
+                                        (u.date/extract-units unit)         :numbers
+                                        (field/unix-timestamp? field)       :datetimes
+                                        (isa? base_type :type/Number)       :numbers
+                                        (isa? base_type :type/Temporal)     :datetimes
+                                        :else                               :others))))]
     (cond
       (timeseries? cols-by-type) (timeseries-insight cols-by-type)
       :else                      (f/constant-fingerprinter nil))))

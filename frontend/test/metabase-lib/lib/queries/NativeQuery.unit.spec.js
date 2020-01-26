@@ -1,7 +1,8 @@
+import { assocIn } from "icepick";
+
 import {
-  question,
-  DATABASE_ID,
-  MONGO_DATABASE_ID,
+  SAMPLE_DATASET,
+  MONGO_DATABASE,
 } from "__support__/sample_dataset_fixture";
 
 import NativeQuery from "metabase-lib/lib/queries/NativeQuery";
@@ -19,15 +20,15 @@ function makeDatasetQuery(queryText, templateTags, databaseId) {
 
 function makeQuery(query, templateTags) {
   return new NativeQuery(
-    question,
-    makeDatasetQuery(query, templateTags, DATABASE_ID),
+    SAMPLE_DATASET.question(),
+    makeDatasetQuery(query, templateTags, SAMPLE_DATASET.id),
   );
 }
 
 function makeMongoQuery(query, templateTags) {
   return new NativeQuery(
-    question,
-    makeDatasetQuery(query, templateTags, MONGO_DATABASE_ID),
+    SAMPLE_DATASET.question(),
+    makeDatasetQuery(query, templateTags, MONGO_DATABASE.id),
   );
 }
 
@@ -45,12 +46,12 @@ describe("NativeQuery", () => {
     });
     describe("databaseId()", () => {
       it("returns the Database ID of the wrapped query ", () => {
-        expect(query.databaseId()).toBe(DATABASE_ID);
+        expect(query.databaseId()).toBe(SAMPLE_DATASET.id);
       });
     });
     describe("database()", () => {
       it("returns a dictionary with the underlying database of the wrapped query", () => {
-        expect(query.database().id).toBe(DATABASE_ID);
+        expect(query.database().id).toBe(SAMPLE_DATASET.id);
       });
     });
 
@@ -125,6 +126,21 @@ describe("NativeQuery", () => {
       });
     });
   });
+  describe("clean", () => {
+    it("should add template-tags: {} if there are none", () => {
+      const cleanedQuery = native =>
+        new NativeQuery(SAMPLE_DATASET.question(), {
+          type: "native",
+          database: SAMPLE_DATASET.id,
+          native,
+        })
+          .clean()
+          .datasetQuery();
+      const q1 = cleanedQuery({ query: "select 1" });
+      const q2 = cleanedQuery({ query: "select 1", "template-tags": {} });
+      expect(q1).toEqual(q2);
+    });
+  });
   describe("Acessing the underlying native query", () => {
     describe("You can access the actual native query via queryText()", () => {
       expect(makeQuery("SELECT * FROM ORDERS").queryText()).toEqual(
@@ -170,6 +186,30 @@ describe("NativeQuery", () => {
         expect(tagMaps["max_price"].name).toEqual("max_price");
         expect(tagMaps["max_price"].display_name).toEqual("Max price");
       });
+    });
+    describe("Invalid template tags prevent the query from running", () => {
+      let q = makeQuery().setQueryText("SELECT * from ORDERS where {{foo}}");
+      expect(q.canRun()).toBe(true);
+
+      // set template tag's type to dimension without setting field id
+      q = q.setDatasetQuery(
+        assocIn(
+          q.datasetQuery(),
+          ["native", "template-tags", "foo", "type"],
+          "dimension",
+        ),
+      );
+      expect(q.canRun()).toBe(false);
+
+      // now set the field
+      q = q.setDatasetQuery(
+        assocIn(
+          q.datasetQuery(),
+          ["native", "template-tags", "foo", "dimension"],
+          ["field-id", 123],
+        ),
+      );
+      expect(q.canRun()).toBe(true);
     });
   });
 });

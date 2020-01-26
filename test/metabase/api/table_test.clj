@@ -10,7 +10,6 @@
              [util :as u]]
             [metabase.api.table :as table-api]
             [metabase.driver.util :as driver.u]
-            [metabase.mbql.schema :as mbql.s]
             [metabase.middleware.util :as middleware.u]
             [metabase.models
              [card :refer [Card]]
@@ -422,7 +421,7 @@
   (let [card-virtual-table-id (str "card__" (u/get-id card))]
     {:display_name      "Go Dubs!"
      :schema            "Everything else"
-     :db_id             mbql.s/saved-questions-virtual-database-id
+     :db_id             (:database_id card)
      :id                card-virtual-table-id
      :description       nil
      :dimension_options (default-dimension-options)
@@ -470,7 +469,7 @@
   (let [card-virtual-table-id (str "card__" (u/get-id card))]
     {:display_name      "Users"
      :schema            "Everything else"
-     :db_id             mbql.s/saved-questions-virtual-database-id
+     :db_id             (:database_id card)
      :id                card-virtual-table-id
      :description       nil
      :dimension_options (default-dimension-options)
@@ -496,8 +495,8 @@
                           :dimension_options        (var-get #'table-api/datetime-dimension-indexes)
                           :fingerprint              {:global {:distinct-count 15
                                                               :nil%           0.0},
-                                                     :type   {:type/DateTime {:earliest "2014-01-01T08:30:00.000Z",
-                                                                              :latest   "2014-12-05T15:15:00.000Z"}}}}]})
+                                                     :type   {:type/DateTime {:earliest "2014-01-01T08:30:00"
+                                                                              :latest   "2014-12-05T15:15:00"}}}}]})
   (do
     ;; run the Card which will populate its result_metadata column
     ((test-users/user->client :crowberto) :post 200 (format "card/%d/query" (u/get-id card)))

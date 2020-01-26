@@ -1,12 +1,12 @@
 (ns metabase.query-processor.middleware.parameters.mbql
   "Code for handling parameter substitution in MBQL queries."
-  (:require [metabase.mbql
+  (:require [metabase.driver.common.parameters.dates :as date-params]
+            [metabase.mbql
              [schema :as mbql.s]
              [util :as mbql.u]]
             [metabase.models
              [field :refer [Field]]
              [params :as params]]
-            [metabase.query-processor.middleware.parameters.dates :as date-params]
             [metabase.util.schema :as su]
             [schema.core :as s]
             [toucan.db :as db]))
@@ -36,7 +36,7 @@
     :else
     (Long/parseLong param-value)))
 
-(s/defn ^:private build-filter-clause :- mbql.s/Filter
+(s/defn ^:private build-filter-clause :- (s/maybe mbql.s/Filter)
   [{param-type :type, param-value :value, [_ field :as target] :target, :as param}]
   (cond
     ;; multipe values. Recursively handle them all and glue them all together with an OR clause
@@ -49,6 +49,12 @@
     (date-params/date-type? param-type)
     (date-params/date-string->filter (parse-param-value-for-type param-type param-value (params/field-form->id field))
                                      field)
+
+    ;; TODO - We can't tell the difference between a dashboard parameter (convert to an MBQL filter) and a native
+    ;; query template tag parameter without this. There's should be a better, less fragile way to do this. (Not 100%
+    ;; sure why, but this is needed for GTAPs to work.)
+    (mbql.u/is-clause? :template-tag field)
+    nil
 
     ;; single-value, non-date param. Generate MBQL [= [field-id <field>] <value>] clause
     :else

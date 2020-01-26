@@ -75,15 +75,12 @@ executors:
      working_directory: /home/circleci/metabase/metabase/
      docker:
        - image: circleci/clojure:lein-2.8.1
-       - image: circleci/mongo:3.4
+       - image: circleci/mongo:4.0
 
   presto:
     working_directory: /home/circleci/metabase/metabase/
     docker:
       - image: circleci/clojure:lein-2.8.1
-        environment:
-          MB_PRESTO_TEST_HOST: localhost
-          MB_PRESTO_TEST_PORT: 8080
       - image: metabase/presto-mb-ci
         environment:
           JAVA_TOOL_OPTIONS: "-Xmx2g"
@@ -187,6 +184,15 @@ jobs:
               do echo `md5sum $file` >> backend-checksums.txt;
             done;
             echo `md5sum project.clj` >> backend-checksums.txt
+      # Do the same for the frontend
+      - run:
+          name: Generate checksums of all frontend source files to use as Uberjar cache key
+          command: >
+            for file in `find ./frontend -type f | sort`;
+              do echo `md5sum $file` >> frontend-checksums.txt;
+            done;
+            echo `md5sum yarn.lock` >> frontend-checksums.txt
+            echo `md5sum webpack.config.js` >> frontend-checksums.txt
       - persist_to_workspace:
           root: /home/circleci/
           paths:
@@ -203,6 +209,22 @@ jobs:
       - run:
           name: Lint YAML files
           command: ./node_modules/.bin/yamllint `find resources -name '*.yaml'`
+          no_output_timeout: 2m
+
+  verify-i18n-files:
+    executor: node
+    steps:
+      - attach-workspace
+      - restore-fe-deps-cache
+      - run:
+          name: Update apt
+          command: sudo apt-get update
+      - run:
+          name: Install gettext
+          command: sudo apt-get install gettext
+      - run:
+          name: Verify i18n .po files
+          command: ./bin/i18n/build-translation-resources
           no_output_timeout: 2m
 
 
@@ -329,12 +351,12 @@ jobs:
       - attach-workspace
       - restore-be-deps-cache
       - run:
-          name: Test migrating from H2 -> << parameters.db-type >>
+          name: Test migrating from H2 -> << parameters.db-type >> -> H2
           environment:
             MB_DB_TYPE: << parameters.db-type >>
             MB_DB_HOST: localhost
           command: >
-            lein run load-from-h2 ./frontend/test/__runner__/test_db_fixture.db
+            ./bin/test-load-and-dump.sh
           no_output_timeout: 5m
 
 
@@ -364,6 +386,7 @@ jobs:
             - /home/circleci/.yarn-cache
             - /home/circleci/metabase/metabase/node_modules
             - /home/circleci/yarn.lock.checksum
+            - /home/circleci/.cache/Cypress
 
   fe-linter-eslint:
     executor: node
@@ -407,6 +430,13 @@ jobs:
           command-name: Run frontend integration tests
           command: run test-integration
 
+  fe-tests-timezones:
+    executor: node
+    steps:
+      - run-yarn-command:
+          command-name: Run frontend timezone tests
+          command: run test-timezones
+
   build-uberjar:
     executor: clojure-and-node
     steps:
@@ -414,16 +444,18 @@ jobs:
       - restore-be-deps-cache
       - restore_cache:
           keys:
-            - uberjar-{{ checksum "./backend-checksums.txt" }}
+            - uberjar-{{ checksum "./backend-checksums.txt" }}-{{ checksum "./frontend-checksums.txt" }}
       - run:
           name: Build uberjar if needed
           command: >
             if [ ! -f './target/uberjar/metabase.jar' ];
-              then ./bin/build version uberjar;
+              then ./bin/build version frontend uberjar;
             fi
           no_output_timeout: 5m
+      - store_artifacts:
+          path: /home/circleci/metabase/metabase/target/uberjar/metabase.jar
       - save_cache:
-          key: uberjar-{{ checksum "./backend-checksums.txt" }}
+          key: uberjar-{{ checksum "./backend-checksums.txt" }}-{{ checksum "./frontend-checksums.txt" }}
           paths:
             - /home/circleci/metabase/metabase/target/uberjar/metabase.jar
 
@@ -441,6 +473,23 @@ jobs:
                 name: Generate version file
                 command: ./bin/build version
 
+  fe-tests-cypress:
+    executor: clojure-and-node
+    steps:
+      - run-yarn-command:
+          command-name: Run Cypress tests
+          command: run test-cypress-no-build
+          before-steps:
+            - restore_cache:
+                keys:
+                  - uberjar-{{ checksum "./backend-checksums.txt" }}
+            - run:
+                name: Generate version file
+                command: ./bin/build version
+      - store_artifacts:
+          path: /home/circleci/metabase/metabase/cypress
+      - store_test_results:
+          path: cypress/results
 
 ########################################################################################################################
 #                                                   DEPLOYMENT, ETC.                                                   #
@@ -466,6 +515,11 @@ workflows:
       - yaml-linter:
           requires:
             - checkout
+
+      - verify-i18n-files:
+          requires:
+            - checkout
+            - fe-deps
 
       - be-deps:
           requires:
@@ -551,7 +605,7 @@ workflows:
           requires:
             - be-tests
           jdbc-driver-source: ORACLE_JDBC_JAR
-          jdbc-driver-dest: ojdbc7.jar
+          jdbc-driver-dest: ojdbc8.jar
           driver: oracle
 
       - test-driver:
@@ -649,6 +703,9 @@ workflows:
       - fe-tests-integration:
           requires:
             - fe-deps
+      - fe-tests-timezones:
+          requires:
+            - fe-deps
       - build-uberjar:
           requires:
             - be-deps
@@ -656,10 +713,15 @@ workflows:
           requires:
             - build-uberjar
             - fe-deps
+      - fe-tests-cypress:
+          requires:
+            - build-uberjar
+            - fe-deps
 
       - deploy-master:
           requires:
             - yaml-linter
+            - verify-i18n-files
 
             - be-linter-bikeshed
             - be-linter-docstring-checker
@@ -694,6 +756,7 @@ workflows:
 
             - fe-tests-e2e
             - fe-tests-integration
+            - fe-tests-timezones
             - fe-tests-karma
             - fe-tests-unit
           filters:

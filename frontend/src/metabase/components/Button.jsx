@@ -2,7 +2,7 @@ import React from "react";
 import PropTypes from "prop-types";
 import sys from "system-components";
 
-import Icon from "metabase/components/Icon.jsx";
+import Icon from "metabase/components/Icon";
 import cx from "classnames";
 import _ from "underscore";
 
@@ -29,6 +29,7 @@ const BaseButton = ({
   iconSize,
   iconColor,
   iconVertical,
+  labelBreakpoint,
   color,
   children,
   ...props
@@ -37,32 +38,36 @@ const BaseButton = ({
     variant => "Button--" + variant,
   );
 
-  const onlyIcon = !children;
-
   return (
     <button
       {..._.omit(props, ...BUTTON_VARIANTS)}
-      className={cx("Button", className, "flex-no-shrink", variantClasses)}
+      className={cx("Button", className, "flex-no-shrink", variantClasses, {
+        p1: !children,
+      })}
     >
       <div
         className={cx("flex layout-centered", { "flex-column": iconVertical })}
         style={iconVertical ? { minWidth: 60 } : null}
       >
         {icon && (
-          <Icon
-            color={iconColor}
-            name={icon}
-            size={iconSize ? iconSize : 14}
-            className={!onlyIcon ? (iconVertical ? "mb1" : "mr1") : null}
-          />
+          <Icon color={iconColor} name={icon} size={iconSize ? iconSize : 14} />
         )}
-        <div>{children}</div>
+        {children && (
+          <div
+            className={cx({
+              [iconVertical ? "mt1" : "ml1"]: icon,
+              [iconVertical ? "mb1" : "mr1"]: iconRight,
+              [`hide ${labelBreakpoint}-show`]: !!labelBreakpoint,
+            })}
+          >
+            {children}
+          </div>
+        )}
         {iconRight && (
           <Icon
             color={iconColor}
             name={iconRight}
             size={iconSize ? iconSize : 14}
-            className={!onlyIcon ? (iconVertical ? "mt1" : "ml1") : null}
           />
         )}
       </div>

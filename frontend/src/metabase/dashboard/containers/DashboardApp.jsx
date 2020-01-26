@@ -4,8 +4,9 @@ import React, { Component } from "react";
 import { connect } from "react-redux";
 import { push } from "react-router-redux";
 import title from "metabase/hoc/Title";
+import titleWithLoadingTime from "metabase/hoc/TitleWithLoadingTime";
 
-import Dashboard from "metabase/dashboard/components/Dashboard.jsx";
+import Dashboard from "metabase/dashboard/components/Dashboard";
 
 import { fetchDatabaseMetadata } from "metabase/redux/metadata";
 import { setErrorPage } from "metabase/redux/app";
@@ -21,6 +22,7 @@ import {
   getEditingParameter,
   getParameters,
   getParameterValues,
+  getLoadingStartTime,
 } from "../selectors";
 import { getDatabases, getMetadata } from "metabase/selectors/metadata";
 import { getUserIsAdmin } from "metabase/selectors/user";
@@ -47,6 +49,7 @@ const mapStateToProps = (state, props) => {
     parameters: getParameters(state, props),
     parameterValues: getParameterValues(state, props),
     metadata: getMetadata(state),
+    loadingStartTime: getLoadingStartTime(state),
   };
 };
 
@@ -67,6 +70,7 @@ type DashboardAppState = {
   mapDispatchToProps,
 )
 @title(({ dashboard }) => dashboard && dashboard.name)
+@titleWithLoadingTime("loadingStartTime")
 // NOTE: should use DashboardControls and DashboardData HoCs here?
 export default class DashboardApp extends Component {
   state: DashboardAppState = {
